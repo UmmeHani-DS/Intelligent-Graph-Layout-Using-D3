@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Graph Layout Dashboard</title>
+    <script src="https://d3js.org/d3.v6.min.js"></script>
+    <link rel="stylesheet" type="text/css" href="indexstyle.css">
+    <script src="chord.js"></script>
+    <script src="grid.js"></script>
+    <script src="Sugiyama-layers.js"></script>
+    <script src="directed-sugiyama.js"></script>
+    <script src="radial-sugiyama.js"></script>
+    <script src="reingold-tilford-tree.js"></script>
+    <script src="icicle-tree.js"></script>
+
+</head>
+
+<body>
+
+    <div class="container">
+        <h1>Intelligent Graph Layout</h1>
+
+        <label for="csvFile">Choose a csv file:</label>
+        <input type="file" id="inputFile" accept=".csv" />
+        <button class="upload-button" onclick="fileUpload()">UPLOAD FILE</button>
+
+        <svg class="gridLayout" width="600" height="680" style="border: 1px solid;">
+          <!-- <text x="50%" y="50" text-anchor="middle" font-size="30" fill="black">GRID LAYOUT</text> --> 
+        </svg>
+        <svg class="chordLayout" width="600" height="680" style="border: 1px solid;">
+            <!-- <text x="50%" y="50" text-anchor="middle" font-size="30" fill="black">CHORD LAYOUT</text> -->
+        </svg>
+
+        <svg class="sugiyamaLayout" width="600" height="680" style="border: 1px solid;">
+            <!-- <text x="50%" y="50" text-anchor="middle" font-size="30" fill="black">SUGIYAMA-LAYERED LAYOUT</text> -->
+        </svg>
+
+        <svg class="sugiyamaDirectedLayout" width="600" height="680" style="border: 1px solid;">
+            <!-- <text x="50%" y="50" text-anchor="middle" font-size="30" fill="black">SUGIYAMA-DIRECTED LAYOUT</text> -->
+        </svg>
+
+        <svg class="sugiyamaRadialLayout" width="600" height="680" style="border: 1px solid;">
+            <!-- <text x="50%" y="50" text-anchor="middle" font-size="30" fill="black">SUGIYAMA-RADIAL LAYOUT</text> -->
+        </svg>
+
+        <div id="output"></div>
+        <div id="rheingold-tilford-layout"></div>
+        <div id="icicle-layout"></div>
+    </div>
+
+
+
+    <script>
+        // Function to read the uploaded file and process the adjacency matrix
+
+        function fileUpload() {
+            const fileInput = document.getElementById('inputFile');
+            const file = fileInput.files[0];
+
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const data = e.target.result;
+                    try {
+                        GraphType(data);
+
+                    } catch (error) {
+                        alert('Error processing file: ' + error.message);
+                    }
+                };
+                reader.readAsText(file);
+            } else {
+                alert('Please select a file.');
+            }
+
+        }
+
+
+        // Function to determine the Graph Type
+
+        function GraphType(data) {
+
+            const rows = data.split('\n');
+            const rowLabels = rows[0].trim().split(',').slice(1); // Extract row labels
+            const columnLabels = rows.slice(1).map(row => row.trim().split(',')[0]); // Extract column labels
+            const matrix = rows.slice(1).map(row => row.trim().split(',').slice(1).map(Number)); // Extract matrix data
+            const datalist = displayMatrix(data);
+            // code to check connectivity
+
+            const numNodes = matrix.length;
+            const visited = new Array(numNodes).fill(false);
+            dfs(matrix, visited, 0);
+
+            const isConnected = visited.every(nodeVisited => nodeVisited);
+
+            // adding edges
+
+            let edges = 0;
+
+            for (let i = 0; i < numNodes; i++) {
+                for (let j = i + 1; j < numNodes; j++) {
+                    if (matrix[i][j] === 1) edges++;
+                }
+            }
+
+            if (isConnected === true) {
+
+                const Directed = isDirected(matrix);
+
+                if (Directed === false) {
+
+                    const cycle = hasCycleDirected(matrix);
+
+                    if (cycle === false) {
+                        const result = 'It is a DAG.';
+                        displayResult(result);
+                        createNodes(datalist);
+                    } else {
+                        const result = 'It is a General Graph.';
+                        displayResult(result);
+                        gridLayout(datalist);
+                        chordLayout(datalist);
+
+                    }
+
+                } else {
+
+                    const cycle = hasCycleUndirected(matrix);
+
+                    if (cycle === true) {
+                        const result = 'It is a General Graph.';
+                        displayResult(result);
+                    } else {
+
+                        if (edges === numNodes - 1) {
+                            const result = 'It is a Tree';
+                            displayResult(result);
+                        } else {
+                            const result = 'It is a neither "DAG", "General graph" , "Tree"';
+                            displayResult(result);
+                        }
+
+                    }
+                }
+            } else {
+
+                if (edges === numNodes - 1) {
+                    const result = 'It is a Tree';
+                    displayResult(result);
+                } else {
+                    const result = 'The graph is not connected';
+                    displayResult(result);
+                }
+            }
+
+        }
+
+        function displayMatrix(data) {
+            const rows = data.split('\n');
+            const labels = rows[0].trim().split(',').slice(1); // Extract labels
+            const adjacencyList = {};
+
+            rows.slice(1).forEach((row, rowIndex) => {
+                const columns = row.trim().split(',');
+                const nodeName = columns[0];
+                const neighbors = [];
+
+                columns.slice(1).forEach((val, colIndex) => {
+                    if (parseInt(val) === 1) {
+                        neighbors.push(labels[colIndex].trim());
+                    }
+                });
+
+                adjacencyList[nodeName.trim()] = neighbors;
+            });
+
+            return adjacencyList; // Return the adjacency list
+        }
+
+        // To check connectivity of a graph
+
+        function dfs(adjMatrix, visited, node) {
+            visited[node] = true;
+
+            for (let i = 0; i < adjMatrix.length; i++) {
+                if (adjMatrix[node][i] === 1 && !visited[i]) {
+                    dfs(adjMatrix, visited, i);
+                }
+            }
+        }
+
+        // To check if its directed or undirected    
+
+        function isDirected(matrix) {
+            const numRows = matrix.length;
+            const numCols = matrix[0].length;
+
+            // Check if matrix is square (number of rows === number of columns)
+            if (numRows !== numCols) {
+                return false; // Graph is directed
+            }
+
+            for (let i = 0; i < numRows; i++) {
+                for (let j = 0; j < numCols; j++) {
+                    if (matrix[i][j] !== matrix[j][i]) {
+                        return false; // If corresponding elements are not equal, graph is directed
+                    }
+                }
+            }
+
+            return true; // Graph is undirected
+        }
+
+        // Cycles in a Directed Graph
+
+        function hasCycleDirected(adjacencyMatrix) {
+            const nodes = Object.keys(adjacencyMatrix);
+            const adjacencyList = {};
+
+            // Convert adjacency matrix to adjacency list
+            for (let node of nodes) {
+                adjacencyList[node] = [];
+                for (let neighbor of nodes) {
+                    if (adjacencyMatrix[node][neighbor] === 1) {
+                        adjacencyList[node].push(neighbor);
+                    }
+                }
+            }
+
+            const visited = {};
+            const stack = {};
+
+            function hasCycleUtil(node) {
+                if (visited[node] === undefined) {
+                    visited[node] = true;
+                    stack[node] = true;
+
+                    for (let neighbor of adjacencyList[node]) {
+                        if (!visited[neighbor] && hasCycleUtil(neighbor)) {
+                            return true;
+                        } else if (stack[neighbor]) {
+                            return true;
+                        }
+                    }
+                }
+
+                stack[node] = false;
+                return false;
+            }
+
+            for (let node in adjacencyList) {
+                if (!visited[node]) {
+                    if (hasCycleUtil(node)) {
+                        return true; // Cycle detected
+                    }
+                }
+            }
+
+            return false; // No cycle found
+        }
+
+
+        // To check cycles in an Undirected Graph
+
+        function hasCycleUndirected(adjacencyMatrix) {
+            const nodes = Object.keys(adjacencyMatrix);
+            const adjacencyList = {};
+
+            // Convert adjacency matrix to adjacency list
+            for (let node of nodes) {
+                adjacencyList[node] = [];
+                for (let neighbor of nodes) {
+                    if (adjacencyMatrix[node][neighbor] === 1) {
+                        adjacencyList[node].push(neighbor);
+                    }
+                }
+            }
+
+            const visited = {};
+
+            function hasCycleUtil(node, parent) {
+                visited[node] = true;
+
+                for (let neighbor of adjacencyList[node]) {
+                    if (!visited[neighbor]) {
+                        if (hasCycleUtil(neighbor, node)) {
+                            return true;
+                        }
+                    } else if (neighbor !== parent) {
+                        return true; // Cycle detected
+                    }
+                }
+
+                return false;
+            }
+
+            // Start DFS traversal from each unvisited node
+            for (let node in adjacencyList) {
+                if (!visited[node]) {
+                    if (hasCycleUtil(node, -1)) {
+                        return true; // Cycle detected
+                    }
+                }
+            }
+
+            return false; // No cycle found
+        }
+
+
+        function displayResult(result) {
+            const outputDiv = document.getElementById('output');
+            outputDiv.textContent = result;
+        }
+    </script>
+</body>
+
+</html>
